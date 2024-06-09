@@ -1,142 +1,163 @@
-/*
- * Copyright (C) 2020 The Android Open Source Project
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 package org.tensorflow.lite.examples.classification
 
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Matrix
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.util.Size
+import android.view.View
+import android.widget.Button
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
-import androidx.camera.core.Camera
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageProxy
-import androidx.camera.core.Preview
+import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Observer
 import androidx.recyclerview.widget.RecyclerView
-import org.tensorflow.lite.examples.classification.ml.FlowerModel
+import com.google.android.gms.maps.model.LatLng
+import com.google.firebase.Firebase
+import com.google.firebase.Timestamp
+import com.google.firebase.database.database
+import com.google.firebase.firestore.firestore
+import org.tensorflow.lite.examples.classification.ml.ModelMbn1
+import org.tensorflow.lite.examples.classification.model.SpeedData
 import org.tensorflow.lite.examples.classification.ui.RecognitionAdapter
 import org.tensorflow.lite.examples.classification.util.YuvToRgbConverter
 import org.tensorflow.lite.examples.classification.viewmodel.Recognition
 import org.tensorflow.lite.examples.classification.viewmodel.RecognitionListViewModel
+import org.tensorflow.lite.gpu.CompatibilityList
 import org.tensorflow.lite.support.image.TensorImage
 import org.tensorflow.lite.support.model.Model
+import java.util.Date
 import java.util.concurrent.Executors
-import org.tensorflow.lite.gpu.CompatibilityList
 
-// Constants
-private const val MAX_RESULT_DISPLAY = 3 // Maximum number of results displayed
-private const val TAG = "TFL Classify" // Name for logging
-private const val REQUEST_CODE_PERMISSIONS = 999 // Return code after asking for permission
-private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA) // permission needed
 
-// Listener for the result of the ImageAnalyzer
+private const val MAX_RESULT_DISPLAY = 3
+private const val TAG = "RS detection"
+private const val REQUEST_CODE_PERMISSIONS = 999
+private val REQUIRED_PERMISSIONS = arrayOf(Manifest.permission.CAMERA)
+private const val LOCATION_PERMISSION_REQUEST_CODE = 1001
+
 typealias RecognitionListener = (recognition: List<Recognition>) -> Unit
 
-/**
- * Main entry point into TensorFlow Lite Classifier
- */
 class MainActivity : AppCompatActivity() {
 
-    // CameraX variables
-    private lateinit var preview: Preview // Preview use case, fast, responsive view of the camera
-    private lateinit var imageAnalyzer: ImageAnalysis // Analysis use case, for running ML code
+    private lateinit var preview: Preview
+    private lateinit var imageAnalyzer: ImageAnalysis
     private lateinit var camera: Camera
     private val cameraExecutor = Executors.newSingleThreadExecutor()
+    private val handler = Handler(Looper.getMainLooper())
 
-    // Views attachment
-    private val resultRecyclerView by lazy {
-        findViewById<RecyclerView>(R.id.recognitionResults) // Display the result of analysis
-    }
-    private val viewFinder by lazy {
-        findViewById<PreviewView>(R.id.viewFinder) // Display the preview image from Camera
-    }
-
-    // Contains the recognition result. Since  it is a viewModel, it will survive screen rotations
     private val recogViewModel: RecognitionListViewModel by viewModels()
+
+    private lateinit var locationManager: LocationManager
+    private lateinit var locationListener: LocationListener
+    private var currentSpeed = 0.0
+
+    private var speedInDouble = 0.0
+
+    private val THRESHOLD = 10.0
+
+
+    private lateinit var outputTextView: TextView
+
+    private var currentLocation: Location? = null
+
+    private lateinit var viewTrafficDetectButton: Button
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         setContentView(R.layout.activity_main)
 
-        // Request camera permissions
+        outputTextView = findViewById(R.id.outputTextView)
+        viewTrafficDetectButton = findViewById(R.id.viewSpeedDataButton)
+
         if (allPermissionsGranted()) {
             startCamera()
+            requestLocationPermission()
         } else {
             ActivityCompat.requestPermissions(
                 this, REQUIRED_PERMISSIONS, REQUEST_CODE_PERMISSIONS
             )
         }
 
-        // Initialising the resultRecyclerView and its linked viewAdaptor
         val viewAdapter = RecognitionAdapter(this)
-        resultRecyclerView.adapter = viewAdapter
+        findViewById<RecyclerView>(R.id.recognitionResults).adapter = viewAdapter
+        findViewById<RecyclerView>(R.id.recognitionResults).itemAnimator = null
 
-        // Disable recycler view animation to reduce flickering, otherwise items can move, fade in
-        // and out as the list change
-        resultRecyclerView.itemAnimator = null
+        recogViewModel.recognitionList.observe(this, Observer {
+            viewAdapter.submitList(it)
+        })
 
-        // Attach an observer on the LiveData field of recognitionList
-        // This will notify the recycler view to update every time when a new list is set on the
-        // LiveData field of recognitionList.
-        recogViewModel.recognitionList.observe(this,
-            Observer {
-                viewAdapter.submitList(it)
-            }
-        )
+        // Thêm sự kiện cho nút chuyển đến MapsFragment
+//        val openMapsButton = findViewById<Button>(R.id.openMapsButton)
+//        openMapsButton.setOnClickListener {
+//            val mapsFragment = MapsFragment2()
+//            supportFragmentManager.beginTransaction()
+//                .replace(R.id.fragmentContainer, mapsFragment)
+//                .addToBackStack(null)
+//                .commit()
+//        }
+
+//        val viewTrafficDetectButton = findViewById<Button>(R.id.viewSpeedDataButton)
+//        viewTrafficDetectButton.setOnClickListener {
+//            val speedDataFragment = SpeedDataFragment()
+//            supportFragmentManager.beginTransaction()
+//                .replace(R.id.fragmentContainer, speedDataFragment)
+//                .addToBackStack(null)
+//                .commit()
+//        }
 
     }
 
-    /**
-     * Check all permissions are granted - use for Camera permission in this example.
-     */
     private fun allPermissionsGranted(): Boolean = REQUIRED_PERMISSIONS.all {
         ContextCompat.checkSelfPermission(
             baseContext, it
         ) == PackageManager.PERMISSION_GRANTED
     }
 
-    /**
-     * This gets called after the Camera permission pop up is shown.
-     */
+    private fun requestLocationPermission() {
+        if (ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            startLocationUpdates()
+        } else {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.ACCESS_FINE_LOCATION),
+                LOCATION_PERMISSION_REQUEST_CODE
+            )
+        }
+    }
+
     override fun onRequestPermissionsResult(
         requestCode: Int,
-        permissions: Array<String>,
+        permissions: Array<out String>,
         grantResults: IntArray
     ) {
         if (requestCode == REQUEST_CODE_PERMISSIONS) {
             if (allPermissionsGranted()) {
                 startCamera()
+                requestLocationPermission()
             } else {
-                // Exit the app if permission is not granted
-                // Best practice is to explain and offer a chance to re-request but this is out of
-                // scope in this sample. More details:
-                // https://developer.android.com/training/permissions/usage-notes
                 Toast.makeText(
                     this,
                     getString(R.string.permission_deny_text),
@@ -144,80 +165,112 @@ class MainActivity : AppCompatActivity() {
                 ).show()
                 finish()
             }
+        } else if (requestCode == LOCATION_PERMISSION_REQUEST_CODE) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                startLocationUpdates()
+            } else {
+                Toast.makeText(
+                    this,
+                    "Ứng dụng cần quyền truy cập vị trí để xác định tốc độ.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
         }
     }
 
-    /**
-     * Start the Camera which involves:
-     *
-     * 1. Initialising the preview use case
-     * 2. Initialising the image analyser use case
-     * 3. Attach both to the lifecycle of this activity
-     * 4. Pipe the output of the preview object to the PreviewView on the screen
-     */
     private fun startCamera() {
         val cameraProviderFuture = ProcessCameraProvider.getInstance(this)
 
         cameraProviderFuture.addListener(Runnable {
-            // Used to bind the lifecycle of cameras to the lifecycle owner
             val cameraProvider: ProcessCameraProvider = cameraProviderFuture.get()
 
             preview = Preview.Builder()
                 .build()
 
             imageAnalyzer = ImageAnalysis.Builder()
-                // This sets the ideal size for the image to be analyse, CameraX will choose the
-                // the most suitable resolution which may not be exactly the same or hold the same
-                // aspect ratio
                 .setTargetResolution(Size(224, 224))
-                // How the Image Analyser should pipe in input, 1. every frame but drop no frame, or
-                // 2. go to the latest frame and may drop some frame. The default is 2.
-                // STRATEGY_KEEP_ONLY_LATEST. The following line is optional, kept here for clarity
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
-                .also { analysisUseCase: ImageAnalysis ->
-                    analysisUseCase.setAnalyzer(cameraExecutor, ImageAnalyzer(this) { items ->
-                        // updating the list of recognised objects
+                .also {
+                    it.setAnalyzer(cameraExecutor, ImageAnalyzer(currentSpeed,this@MainActivity) { items ->
                         recogViewModel.updateData(items)
                     })
                 }
 
-            // Select camera, back is the default. If it is not available, choose front camera
             val cameraSelector =
                 if (cameraProvider.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA))
                     CameraSelector.DEFAULT_BACK_CAMERA else CameraSelector.DEFAULT_FRONT_CAMERA
 
             try {
-                // Unbind use cases before rebinding
                 cameraProvider.unbindAll()
 
-                // Bind use cases to camera - try to bind everything at once and CameraX will find
-                // the best combination.
                 camera = cameraProvider.bindToLifecycle(
                     this, cameraSelector, preview, imageAnalyzer
                 )
 
-                // Attach the preview to preview view, aka View Finder
-                preview.setSurfaceProvider(viewFinder.surfaceProvider)
+                preview.setSurfaceProvider(findViewById<PreviewView>(R.id.viewFinder).surfaceProvider)
             } catch (exc: Exception) {
                 Log.e(TAG, "Use case binding failed", exc)
             }
-
         }, ContextCompat.getMainExecutor(this))
     }
 
-    private class ImageAnalyzer(ctx: Context, private val listener: RecognitionListener) :
-        ImageAnalysis.Analyzer {
+    private fun startLocationUpdates() {
+        locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        locationListener = object : LocationListener {
+            override fun onLocationChanged(location: Location) {
+                currentSpeed = location.speed * 3.6
+                currentLocation = location // Cập nhật giá trị vị trí hiện tại
+                updateSpeedUI()
+            }
 
-        // TODO 1: Add class variable TensorFlow Lite Model
-        // Initializing the flowerModel by lazy so that it runs in the same thread when the process
-        // method is called.
-        private val flowerModel: FlowerModel by lazy{
+            override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {
+                // Not needed for this example
+            }
 
-            // TODO 6. Optional GPU acceleration
+            override fun onProviderEnabled(provider: String) {
+                // Not needed for this example
+            }
+
+            override fun onProviderDisabled(provider: String) {
+                // Not needed for this example
+            }
+        }
+
+        try {
+            locationManager.requestLocationUpdates(
+                LocationManager.GPS_PROVIDER,
+                0L,
+                0f,
+                locationListener
+            )
+        } catch (e: SecurityException) {
+            Log.e(TAG, "Error requesting location updates: ${e.message}")
+        }
+    }
+
+    private fun updateSpeedUI() {
+        handler.post {
+            findViewById<TextView>(R.id.speedTextView).text = "Speed: ${currentSpeed} km/h"
+        }
+    }
+
+    private fun updateOutputText(output: String) {
+        handler.post {
+            outputTextView.text = output
+        }
+    }
+
+    private class ImageAnalyzer(
+        private var currentSpeed: Double,
+        private val mainActivity: MainActivity,
+        private val listener: RecognitionListener
+    ) : ImageAnalysis.Analyzer {
+
+        private val flowerModel: ModelMbn1 by lazy {
             val compatList = CompatibilityList()
 
-            val options = if(compatList.isDelegateSupportedOnThisDevice) {
+            val options = if (compatList.isDelegateSupportedOnThisDevice) {
                 Log.d(TAG, "This device is GPU Compatible ")
                 Model.Options.Builder().setDevice(Model.Device.GPU).build()
             } else {
@@ -225,57 +278,95 @@ class MainActivity : AppCompatActivity() {
                 Model.Options.Builder().setNumThreads(4).build()
             }
 
-            // Initialize the Flower Model
-            FlowerModel.newInstance(ctx, options)
+            ModelMbn1.newInstance(mainActivity, options)
         }
 
         override fun analyze(imageProxy: ImageProxy) {
-
             val items = mutableListOf<Recognition>()
 
-            // TODO 2: Convert Image to Bitmap then to TensorImage
             val tfImage = TensorImage.fromBitmap(toBitmap(imageProxy))
 
-            // TODO 3: Process the image using the trained model, sort and pick out the top results
             val outputs = flowerModel.process(tfImage)
                 .probabilityAsCategoryList.apply {
-                    sortByDescending { it.score } // Sort with highest confidence first
-                }.take(MAX_RESULT_DISPLAY) // take the top results
+                    sortByDescending { it.score }
+                }.take(MAX_RESULT_DISPLAY)
 
-            // TODO 4: Converting the top probability items into a list of recognitions
+            var doubleSpeed = 60.0
+            var hasScoreOverThreshold = false
+
+            val database = Firebase.database
+
+            val speedRef = database.getReference("Speed")
+
+            val speed = outputs[0].label.substring(0, outputs[0].label.indexOf("K"))
+
+            if (outputs[0].score > 0.8) {
+                doubleSpeed = speed.toDouble()
+                speedRef.setValue(doubleSpeed)
+
+                val currentTimeStamp = Timestamp(Date())
+                val currentLocation = mainActivity.currentLocation
+                val currentLatLng = currentLocation?.let { LatLng(it.latitude, it.longitude) }
+
+                if (currentLatLng != null) {
+                    val speedDataId = "speed_${doubleSpeed}_kmh" // Thay thế dấu '/' bằng ''
+                    val speedData = SpeedData(doubleSpeed, currentTimeStamp, currentLatLng)
+
+                    val db = Firebase.firestore
+                    db.collection("speedData")
+                        .document(speedDataId)
+                        .set(speedData)
+                        .addOnSuccessListener {
+                            Log.d(TAG, "Speed data added with ID: $speedDataId")
+                        }
+                        .addOnFailureListener { e ->
+                            Log.w(TAG, "Error adding speed data", e)
+                        }
+                }
+
+
+
+                hasScoreOverThreshold = true
+            } else if (!hasScoreOverThreshold) {
+                doubleSpeed = speed.toDouble()
+            }
+
+
+            val outputTextView = mainActivity.findViewById<TextView>(R.id.outputTextView)
+            if (currentSpeed < doubleSpeed ) {
+                outputTextView.setBackgroundColor(
+                    ContextCompat.getColor(mainActivity, R.color.speed_limit_color)
+                )
+                mainActivity.updateOutputText("lower than speed limit " + doubleSpeed + " km/h")
+            }
+            else
+            {
+                outputTextView.setBackgroundColor(
+                    ContextCompat.getColor(mainActivity, R.color.speed_exceed_color)
+                )
+                mainActivity.updateOutputText("Over the speed limit, please slow down below " + doubleSpeed + " km/h")
+            }
+
             for (output in outputs) {
                 items.add(Recognition(output.label, output.score))
             }
 
-//            // START - Placeholder code at the start of the codelab. Comment this block of code out.
-//            for (i in 0 until MAX_RESULT_DISPLAY){
-//                items.add(Recognition("Fake label $i", Random.nextFloat()))
-//            }
-//            // END - Placeholder code at the start of the codelab. Comment this block of code out.
-
-            // Return the result
             listener(items.toList())
 
-            // Close the image,this tells CameraX to feed the next image to the analyzer
             imageProxy.close()
         }
 
-        /**
-         * Convert Image Proxy to Bitmap
-         */
-        private val yuvToRgbConverter = YuvToRgbConverter(ctx)
+
+        private val yuvToRgbConverter = YuvToRgbConverter(mainActivity)
         private lateinit var bitmapBuffer: Bitmap
         private lateinit var rotationMatrix: Matrix
 
         @SuppressLint("UnsafeExperimentalUsageError")
         private fun toBitmap(imageProxy: ImageProxy): Bitmap? {
-
             val image = imageProxy.image ?: return null
 
-            // Initialise Buffer
             if (!::bitmapBuffer.isInitialized) {
-                // The image rotation and RGB image buffer are initialized only once
-                Log.d(TAG, "Initalise toBitmap()")
+                Log.d(TAG, "Initialize toBitmap()")
                 rotationMatrix = Matrix()
                 rotationMatrix.postRotate(imageProxy.imageInfo.rotationDegrees.toFloat())
                 bitmapBuffer = Bitmap.createBitmap(
@@ -283,10 +374,8 @@ class MainActivity : AppCompatActivity() {
                 )
             }
 
-            // Pass image to an image analyser
             yuvToRgbConverter.yuvToRgb(image, bitmapBuffer)
 
-            // Create the Bitmap in the correct orientation
             return Bitmap.createBitmap(
                 bitmapBuffer,
                 0,
@@ -297,7 +386,5 @@ class MainActivity : AppCompatActivity() {
                 false
             )
         }
-
     }
-
 }

@@ -1,53 +1,89 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-  ~ Copyright (C) 2020 The Android Open Source Project
-  ~
-  ~ Licensed under the Apache License, Version 2.0 (the "License");
-  ~ you may not use this file except in compliance with the License.
-  ~ You may obtain a copy of the License at
-  ~
-  ~      http://www.apache.org/licenses/LICENSE-2.0
-  ~
-  ~ Unless required by applicable law or agreed to in writing, software
-  ~ distributed under the License is distributed on an "AS IS" BASIS,
-  ~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-  ~ See the License for the specific language governing permissions and
-  ~ limitations under the License.
-  -->
+<merge xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".MainActivity">
 
-<merge
-        xmlns:android="http://schemas.android.com/apk/res/android"
-        xmlns:app="http://schemas.android.com/apk/res-auto"
-        xmlns:tools="http://schemas.android.com/tools"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        tools:context=".MainActivity">
-
+        <!-- Camera Preview -->
         <androidx.camera.view.PreviewView
             android:id="@+id/viewFinder"
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
+        <!-- Toolbar -->
         <androidx.appcompat.widget.Toolbar
             android:id="@+id/toolbar"
             android:layout_width="match_parent"
             android:layout_height="?attr/actionBarSize"
             android:layout_gravity="top"
             android:background="#8000">
-
-                <ImageView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:src="@drawable/tfl2_logo"
-                    android:contentDescription="@string/tensorflow_lite_logo_description" />
-
         </androidx.appcompat.widget.Toolbar>
 
+        <!-- Speed TextView -->
+        <TextView
+            android:id="@+id/speedTextView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|center_horizontal"
+            android:padding="16dp"
+            android:text="Speed: 0 km/h"
+            android:textColor="#FFFFFF"
+            android:textSize="18sp" />
+
+        <!-- Open Maps Button -->
+        <Button
+            android:id="@+id/openMapsButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Open Maps"
+            android:layout_gravity="top|start"
+            android:layout_marginTop="64dp"
+            android:onClick="openMapsFragment" />
+
+        <!-- New Button -->
+        <!-- Button to open SpeedDataFragment -->
+        <Button
+            android:id="@+id/viewSpeedDataButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="View Speed Data"
+            android:layout_gravity="top|end"
+            android:layout_marginTop="64dp"
+            android:layout_marginEnd="16dp"
+            android:onClick="openSpeedDataFragment" />
+
+
+        <!-- Output TextView -->
+        <TextView
+            android:id="@+id/outputTextView"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center|center_horizontal"
+            android:padding="16dp"
+            android:text="Correct speed limit"
+            android:textSize="18sp"
+            android:textColor="@android:color/black"
+            android:layout_marginBottom="210dp"
+            android:background="@drawable/speed_alert_background"/>
+
+        <!-- RecyclerView for Recognition Results -->
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/recognitionResults"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_gravity="bottom"
+            android:layout_below="@id/outputTextView"
             android:orientation="vertical"
-            app:layoutManager="LinearLayoutManager"  />
+            app:layoutManager="LinearLayoutManager" />
+
+        <!-- Fragment Container -->
+        <FrameLayout
+            android:id="@+id/fragmentContainer"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:layout_below="@id/toolbar"
+            android:layout_above="@id/recognitionResults" />
+
 </merge>

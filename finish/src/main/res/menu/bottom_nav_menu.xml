@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/detect"
+        android:title="Detect"
+        android:icon="@drawable/tfl2_logo"/>
+    <item
+        android:id="@+id/tracking"
+        android:title="Map Track"
+        android:icon="@drawable/tfl2_logo"/>
+</menu>

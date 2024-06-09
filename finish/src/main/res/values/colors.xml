@@ -23,4 +23,6 @@
     <color name="teal_700">#018786</color>
     <color name="black">#000000</color>
     <color name="white">#FFFFFF</color>
+    <color name="speed_limit_color">#00FF00</color> <!-- Màu xanh -->
+    <color name="speed_exceed_color">#FF0000</color> <!-- Màu đỏ -->
 </resources>
